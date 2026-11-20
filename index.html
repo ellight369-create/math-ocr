@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="算式辨識加總" />
+  <title>手寫算式辨識與總和 | 網頁版 App</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="https://unpkg.com/lucide@0.460.0/dist/umd/lucide.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+TC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    body {
+      font-family: 'Inter', 'Noto Sans TC', system-ui, -apple-system, sans-serif;
+      -webkit-tap-highlight-color: transparent;
+    }
+    .tabular-nums {
+      font-variant-numeric: tabular-nums;
+    }
+    .canvas-checker {
+      background-color: #f8fafc;
+      background-image:
+        linear-gradient(45deg, #e2e8f0 25%, transparent 25%),
+        linear-gradient(-45deg, #e2e8f0 25%, transparent 25%),
+        linear-gradient(45deg, transparent 75%, #e2e8f0 75%),
+        linear-gradient(-45deg, transparent 75%, #e2e8f0 75%);
+      background-size: 16px 16px;
+      background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+    }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen antialiased">
+  <!-- Toast Container -->
+  <div id="toastContainer" class="fixed bottom-5 right-4 left-4 sm:left-auto z-50 flex flex-col items-end gap-2 pointer-events-none"></div>
+
+  <!-- API Key Modal -->
+  <div id="apiModal" class="hidden fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 space-y-4">
+      <div class="flex items-center justify-between">
+        <h3 class="text-base font-bold text-slate-900">設定 Gemini API Key</h3>
+        <button id="btnCloseModal" type="button" class="p-1 text-slate-400 hover:text-slate-700">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+      <p class="text-xs text-slate-600 leading-relaxed">
+        手寫算式辨識使用 Google Gemini 視覺 AI（支援自動切換備援模型），金鑰僅儲存在你的瀏覽器本機，不會傳送到其他伺服器。可在 Google AI Studio 免費取得。
+      </p>
+      <input id="apiKeyInput" type="password" placeholder="貼上 AIza... 開頭的 Gemini API Key" class="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+      <div class="flex justify-end gap-2 pt-1">
+        <button id="btnCancelModal" type="button" class="px-4 py-2 rounded-xl text-xs font-medium text-slate-600 hover:bg-slate-100">取消</button>
+        <button id="btnSaveApiKey" type="button" class="px-4 py-2 rounded-xl text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white">儲存金鑰</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Header -->
+  <header class="bg-white border-b border-slate-200 sticky top-0 z-30">
+    <div class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5">
+        <div class="w-9 h-9 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+          <i data-lucide="calculator" class="w-5 h-5"></i>
+        </div>
+        <div>
+          <h1 class="text-base sm:text-lg font-bold text-slate-900 leading-tight">手寫算式辨識與總和</h1>
+          <p class="text-[11px] text-slate-500">逐行計算算式結果並自動加總（iPhone / Android 通用）</p>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <button id="btnOpenApiModal" type="button" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 text-xs font-medium text-slate-700 transition">
+          <i id="apiKeyIcon" data-lucide="key-round" class="w-4 h-4 text-amber-500"></i>
+          <span id="apiKeyLabel">設定 API Key</span>
+        </button>
+        <button id="btnSample" type="button" class="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-medium transition">
+          <i data-lucide="file-text" class="w-4 h-4"></i>
+          <span>範例圖片</span>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Content -->
+  <main class="max-w-5xl mx-auto px-4 py-5 grid grid-cols-1 lg:grid-cols-12 gap-5">
+    <!-- Left: Image Upload & Preview -->
+    <section class="lg:col-span-6 flex flex-col gap-4">
+      <!-- Engine Mode & Options -->
+      <div class="bg-white rounded-2xl border border-slate-200 p-3.5 shadow-sm space-y-3">
+        <div class="grid grid-cols-2 gap-2 p-1 bg-slate-100 rounded-xl">
+          <button id="btnModeAi" type="button" class="py-2 px-3 rounded-lg text-xs font-semibold transition bg-white text-indigo-600 shadow-sm flex items-center justify-center gap-1.5">
+            <i data-lucide="sparkles" class="w-3.5 h-3.5"></i>
+            <span>AI 算式辨識 (推薦)</span>
+          </button>
+          <button id="btnModeOcr" type="button" class="py-2 px-3 rounded-lg text-xs font-semibold transition text-slate-600 hover:text-slate-900 flex items-center justify-center gap-1.5">
+            <i data-lucide="cpu" class="w-3.5 h-3.5"></i>
+            <span>離線 OCR</span>
+          </button>
+        </div>
+
+        <div id="aiFilterRow" class="flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div class="flex items-center gap-2">
+            <button id="chipAll" type="button" class="px-2.5 py-1 rounded-full font-medium bg-indigo-50 text-indigo-700 border border-indigo-200">計算全部算式</button>
+            <button id="chipExcludeDate" type="button" class="px-2.5 py-1 rounded-full font-medium bg-slate-50 text-slate-600 border border-slate-200">排除日期與編號</button>
+          </div>
+          <label class="inline-flex items-center gap-1.5 text-slate-600 cursor-pointer">
+            <input id="chkAllowNegative" type="checkbox" class="rounded accent-indigo-600" />
+            <span>含負數</span>
+          </label>
+        </div>
+      </div>
+
+      <!-- Camera / Upload Buttons -->
+      <div class="grid grid-cols-2 gap-3">
+        <label for="cameraInput" class="cursor-pointer py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition">
+          <i data-lucide="camera" class="w-4 h-4"></i>
+          <span>拍照辨識</span>
+        </label>
+        <input id="cameraInput" type="file" accept="image/*" capture="environment" class="hidden" />
+
+        <label for="galleryInput" class="cursor-pointer py-3 px-4 rounded-xl bg-white hover:bg-slate-50 border border-slate-300 text-slate-800 text-sm font-semibold flex items-center justify-center gap-2 shadow-sm transition">
+          <i data-lucide="image" class="w-4 h-4"></i>
+          <span>從相簿選圖</span>
+        </label>
+        <input id="galleryInput" type="file" accept="image/*" class="hidden" />
+      </div>
+
+      <!-- Image Preview Box -->
+      <div id="dropZone" class="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+        <div class="px-4 py-2.5 border-b border-slate-100 flex items-center justify-between text-xs text-slate-500 bg-slate-50/70">
+          <span>圖片預覽（支援拖曳或 Ctrl+V 貼上）</span>
+          <button id="btnRunAgain" type="button" class="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-700 font-semibold">
+            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i>
+            <span>開始 / 重新辨識</span>
+          </button>
+        </div>
+
+        <div class="canvas-checker min-h-[260px] flex items-center justify-center p-3">
+          <img id="previewImg" alt="圖片預覽" class="max-w-full max-h-[360px] h-auto rounded-lg shadow-sm border border-slate-200 object-contain" />
+        </div>
+
+        <div id="progressWrap" class="hidden px-4 py-3 border-t border-slate-100 bg-white">
+          <div class="flex justify-between text-xs text-slate-600 mb-1.5">
+            <span id="progressLabel">正在辨識算式...</span>
+            <span id="progressPct" class="tabular-nums font-medium">處理中</span>
+          </div>
+          <div class="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div id="progressBar" class="h-full bg-indigo-600 transition-all duration-300 animate-pulse" style="width: 65%"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Right: Total Sum & Expression List -->
+    <section class="lg:col-span-6 flex flex-col gap-4">
+      <!-- Total Sum Card -->
+      <div class="bg-gradient-to-br from-indigo-600 to-indigo-700 rounded-2xl p-5 text-white shadow-md">
+        <div class="flex items-center justify-between">
+          <span class="text-xs font-medium uppercase tracking-wider text-indigo-100">各算式結果總和</span>
+          <button id="btnCopySum" type="button" class="inline-flex items-center gap-1 px-3 py-1 rounded-lg bg-white/15 hover:bg-white/25 text-xs font-medium transition">
+            <i data-lucide="copy" class="w-3.5 h-3.5"></i>
+            <span>複製總和</span>
+          </button>
+        </div>
+        <div id="totalSumDisplay" class="text-4xl sm:text-5xl font-bold tabular-nums tracking-tight mt-2 break-all">0</div>
+        <div class="flex items-center justify-between mt-4 pt-3 border-t border-white/15 text-xs text-indigo-100">
+          <span id="statCount" class="tabular-nums">納入計算：0 / 0 筆算式</span>
+          <span id="statModel" class="text-[11px] opacity-85"></span>
+        </div>
+      </div>
+
+      <!-- Expression Items Card -->
+      <div class="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col overflow-hidden">
+        <div class="px-4 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
+          <h2 class="text-sm font-bold text-slate-800">逐行算式與計算結果</h2>
+          <div class="flex items-center gap-1.5">
+            <button id="btnToggleAll" type="button" class="px-2.5 py-1 rounded-lg text-xs font-medium bg-slate-100 hover:bg-slate-200 text-slate-700 transition">全選/取消</button>
+            <button id="btnExportCsv" type="button" class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium bg-emerald-50 hover:bg-emerald-100 text-emerald-700 transition">
+              <i data-lucide="download" class="w-3.5 h-3.5"></i>
+              <span>匯出 CSV</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Manual Add Expression -->
+        <form id="manualAddForm" class="px-4 py-2.5 bg-slate-50 border-b border-slate-100 flex gap-2">
+          <input id="manualExprInput" type="text" placeholder="手動新增算式或數字（如 50x15 或 750）" class="flex-1 min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+          <button type="submit" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold transition shrink-0">
+            + 新增
+          </button>
+        </form>
+
+        <!-- Items List -->
+        <div id="itemsList" class="divide-y divide-slate-100 max-h-[380px] overflow-y-auto">
+          <div class="p-6 text-center text-xs text-slate-400">
+            點擊上方「拍照辨識」或「從相簿選圖」，系統將自動計算每一行算式並加總
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+    const STORAGE_KEY = 'number_sum_gemini_key_v1';
+
+    const state = {
+      useAi: true,
+      presetMode: 'all', // 'all' | 'exclude_date'
+      allowNegative: false,
+      apiKey: '',
+      imageDataUrl: '',
+      items: [], // { id, expr, value, included, isManual }
+      isProcessing: false,
+      usedModel: '',
+    };
+
+    const el = {
+      apiModal: document.getElementById('apiModal'),
+      apiKeyInput: document.getElementById('apiKeyInput'),
+      btnOpenApiModal: document.getElementById('btnOpenApiModal'),
+      btnCloseModal: document.getElementById('btnCloseModal'),
+      btnCancelModal: document.getElementById('btnCancelModal'),
+      btnSaveApiKey: document.getElementById('btnSaveApiKey'),
+      apiKeyIcon: document.getElementById('apiKeyIcon'),
+      apiKeyLabel: document.getElementById('apiKeyLabel'),
+      btnSample: document.getElementById('btnSample'),
+      btnModeAi: document.getElementById('btnModeAi'),
+      btnModeOcr: document.getElementById('btnModeOcr'),
+      aiFilterRow: document.getElementById('aiFilterRow'),
+      chipAll: document.getElementById('chipAll'),
+      chipExcludeDate: document.getElementById('chipExcludeDate'),
+      chkAllowNegative: document.getElementById('chkAllowNegative'),
+      cameraInput: document.getElementById('cameraInput'),
+      galleryInput: document.getElementById('galleryInput'),
+      dropZone: document.getElementById('dropZone'),
+      previewImg: document.getElementById('previewImg'),
+      btnRunAgain: document.getElementById('btnRunAgain'),
+      progressWrap: document.getElementById('progressWrap'),
+      progressLabel: document.getElementById('progressLabel'),
+      progressPct: document.getElementById('progressPct'),
+      progressBar: document.getElementById('progressBar'),
+      totalSumDisplay: document.getElementById('totalSumDisplay'),
+      statCount: document.getElementById('statCount'),
+      statModel: document.getElementById('statModel'),
+      btnCopySum: document.getElementById('btnCopySum'),
+      btnToggleAll: document.getElementById('btnToggleAll'),
+      btnExportCsv: document.getElementById('btnExportCsv'),
+      manualAddForm: document.getElementById('manualAddForm'),
+      manualExprInput: document.getElementById('manualExprInput'),
+      itemsList: document.getElementById('itemsList'),
+      toastContainer: document.getElementById('toastContainer'),
+    };
+
+    function showToast(msg, type = 'info') {
+      const colors = {
+        info: 'bg-slate-800 text-white',
+        success: 'bg-emerald-600 text-white',
+        error: 'bg-rose-600 text-white',
+      };
+      const div = document.createElement('div');
+      div.className = `pointer-events-auto px-4 py-2.5 rounded-xl text-xs font-medium shadow-lg transition-opacity duration-300 ${colors[type] || colors.info}`;
+      div.textContent = msg;
+      el.toastContainer.appendChild(div);
+      setTimeout(() => {
+        div.style.opacity = '0';
+        setTimeout(() => div.remove(), 300);
+      }, 3200);
+    }
+
+    function loadApiKey() {
+      try {
+        state.apiKey = localStorage.getItem(STORAGE_KEY) || '';
+      } catch (_) {
+        state.apiKey = '';
+      }
+      updateApiKeyBadge();
+    }
+
+    function saveApiKey(key) {
+      state.apiKey = key.trim();
+      try {
+        localStorage.setItem(STORAGE_KEY, state.apiKey);
+      } catch (_) {}
+      updateApiKeyBadge();
+    }
+
+    function updateApiKeyBadge() {
+      if (state.apiKey) {
+        el.apiKeyLabel.textContent = 'API Key 已設定';
+        el.apiKeyIcon.classList.remove('text-amber-500');
+        el.apiKeyIcon.classList.add('text-emerald-600');
+      } else {
+        el.apiKeyLabel.textContent = '設定 API Key';
+        el.apiKeyIcon.classList.add('text-amber-500');
+        el.apiKeyIcon.classList.remove('text-emerald-600');
+      }
+    }
+
+    // --- Safe Arithmetic Evaluator (+, -, *, x, ×, /, ÷, parentheses) ---
+    function evaluateExpression(input) {
+      if (!input || !String(input).trim()) return null;
+      const normalized = String(input)
+        .replace(/,/g, '')
+        .replace(/[×xX]/g, '*')
+        .replace(/÷/g, '/')
+        .replace(/＋/g, '+')
+        .replace(/－/g, '-')
+        .replace(/（/g, '(')
+        .replace(/）/g, ')')
+        .replace(/\s+/g, '');
+
+      if (!/^[0-9+\-*/().]+$/.test(normalized)) return null;
+
+      let pos = 0;
+      function parseExpr() {
+        let x = parseTerm();
+        while (pos < normalized.length) {
+          if (normalized[pos] === '+') { pos++; x += parseTerm(); }
+          else if (normalized[pos] === '-') { pos++; x -= parseTerm(); }
+          else break;
+        }
+        return x;
+      }
+      function parseTerm() {
+        let x = parseFactor();
+        while (pos < normalized.length) {
+          if (normalized[pos] === '*') { pos++; x *= parseFactor(); }
+          else if (normalized[pos] === '/') {
+            pos++;
+            const d = parseFactor();
+            if (d === 0) throw new Error('Divide by zero');
+            x /= d;
+          } else break;
+        }
+        return x;
+      }
+      function parseFactor() {
+        if (normalized[pos] === '+') { pos++; return parseFactor(); }
+        if (normalized[pos] === '-') { pos++; return -parseFactor(); }
+        if (normalized[pos] === '(') {
+          pos++;
+          const x = parseExpr();
+          if (normalized[pos] === ')') pos++;
+          return x;
+        }
+        const start = pos;
+        while (pos < normalized.length && ((normalized[pos] >= '0' && normalized[pos] <= '9') || normalized[pos] === '.')) {
+          pos++;
+        }
+        if (start === pos) throw new Error('Invalid token');
+        return parseFloat(normalized.slice(start, pos));
+      }
+
+      try {
+        const val = parseExpr();
+        if (pos !== normalized.length || !Number.isFinite(val)) return null;
+        return val;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function formatExpressionDisplay(expr) {
+      return String(expr)
+        .replace(/[*xX]/g, ' × ')
+        .replace(/\//g, ' ÷ ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    }
+
+    function formatNum(n) {
+      if (!Number.isFinite(n)) return '0';
+      return Number(n.toFixed(6)).toLocaleString('zh-TW', { maximumFractionDigits: 6 });
+    }
+
+    // --- Resize Image to <= 1024px JPEG for Fast Mobile Upload ---
+    function resizeImageFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onerror = () => reject(new Error('讀取圖片失敗'));
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onerror = () => reject(new Error('無效的圖片格式'));
+          img.onload = () => {
+            const maxDim = 1024;
+            let w = img.width;
+            let h = img.height;
+            if (w > maxDim || h > maxDim) {
+              if (w >= h) {
+                h = Math.round((h * maxDim) / w);
+                w = maxDim;
+              } else {
+                w = Math.round((w * maxDim) / h);
+                h = maxDim;
+              }
+            }
+            const c = document.createElement('canvas');
+            c.width = w;
+            c.height = h;
+            c.getContext('2d').drawImage(img, 0, 0, w, h);
+            resolve(c.toDataURL('image/jpeg', 0.82));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    // --- Sample Handwritten Note Generator ---
+    function loadSampleImage() {
+      const c = document.createElement('canvas');
+      c.width = 640;
+      c.height = 480;
+      const ctx = c.getContext('2d');
+      ctx.fillStyle = '#fefce8';
+      ctx.fillRect(0, 0, c.width, c.height);
+      ctx.strokeStyle = '#cbd5e1';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(20, 20, 600, 440);
+
+      ctx.fillStyle = '#1e293b';
+      ctx.font = 'bold 44px "Comic Sans MS", "Noto Sans TC", sans-serif';
+      ctx.fillText('50 × 15', 160, 145);
+      ctx.fillText('11 × 14', 160, 245);
+      ctx.fillText('20 × 22', 160, 345);
+
+      state.imageDataUrl = c.toDataURL('image/jpeg', 0.9);
+      el.previewImg.src = state.imageDataUrl;
+      state.items = [
+        { id: 'sample_1', expr: '50 × 15', value: 750, included: true, isManual: false },
+        { id: 'sample_2', expr: '11 × 14', value: 154, included: true, isManual: false },
+        { id: 'sample_3', expr: '20 × 22', value: 440, included: true, isManual: false },
+      ];
+      state.usedModel = '範例展示';
+      renderItems();
+      updateStats();
+    }
+
+    // --- Gemini Vision Call with Automatic Fallback ---
+    async function recognizeWithGemini(dataUrl) {
+      const base64Data = dataUrl.split(',')[1];
+      const instruction = state.presetMode === 'exclude_date'
+        ? '辨識圖片中每一行的手寫算式（如 50x15）或數值，並排除日期、電話與純流水編號'
+        : '辨識圖片中每一行的手寫算式（如 50x15、11x14）或單獨數值';
+
+      const prompt = `請仔細辨識這張圖片中「每一行」的手寫數學算式（例如 50x15、11×14、20*22、100+50、300÷2 等）或單獨的數值。
+任務說明：${instruction}
+規則：
+1. 不要把算式拆成個別數字，請以「每一行算式」為一個項目。
+2. 只回傳 JSON 陣列，不要任何多餘文字或 Markdown 標記。
+3. 每個元素格式為 {"expression": "算式字串", "value": 計算結果}。
+   - 例如圖片寫「50 x 15」，請回傳 {"expression": "50 * 15", "value": 750}。
+   - 乘號請統一寫成 *，除號寫成 /，不要包含等號、單位或逗號。
+   - 若該行只有單一數字（沒有運算符號），expression 請直接填該數字字串。
+4. value 必須是純數字（支援小數${state.allowNegative ? '與負數' : '，不取負號'}）。`;
+
+      const payload = {
+        contents: [{
+          parts: [
+            { text: prompt },
+            { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+          ]
+        }],
+        generationConfig: {
+          responseMimeType: 'application/json',
+          thinkingConfig: { thinkingLevel: 'LOW' }
+        }
+      };
+
+      let lastErr = null;
+      for (const model of MODELS) {
+        el.progressLabel.textContent = `正在使用 ${model} 辨識算式...`;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 45000);
+
+        try {
+          const resp = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(state.apiKey)}`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload),
+              signal: controller.signal,
+            }
+          );
+          clearTimeout(timer);
+
+          if (resp.ok) {
+            const data = await resp.json();
+            const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text || '[]';
+            const cleaned = rawText.trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+            const arr = JSON.parse(cleaned);
+            state.usedModel = model;
+
+            return (Array.isArray(arr) ? arr : []).reduce((acc, entry, idx) => {
+              const exprRaw = String(entry?.expression ?? entry?.label ?? '').trim();
+              let val = evaluateExpression(exprRaw);
+              if (val === null && entry?.value !== undefined) {
+                const parsed = Number(String(entry.value).replace(/,/g, ''));
+                if (Number.isFinite(parsed)) val = parsed;
+              }
+              if (val === null || !Number.isFinite(val)) return acc;
+              if (!state.allowNegative && val < 0) val = Math.abs(val);
+
+              acc.push({
+                id: `ai_${Date.now()}_${idx}`,
+                expr: exprRaw ? formatExpressionDisplay(exprRaw) : String(val),
+                value: val,
+                included: true,
+                isManual: false,
+              });
+              return acc;
+            }, []);
+          }
+
+          let errMsg = `HTTP ${resp.status}`;
+          try {
+            const errJson = await resp.json();
+            errMsg = errJson?.error?.message || errMsg;
+          } catch (_) {}
+
+          const lower = errMsg.toLowerCase();
+          const retryable = resp.status === 429 || resp.status >= 500 ||
+            lower.includes('high demand') || lower.includes('overloaded') ||
+            lower.includes('unavailable') || lower.includes('not found');
+
+          if (!retryable) throw new Error(errMsg);
+          lastErr = new Error(`[${model}] ${errMsg}`);
+        } catch (err) {
+          clearTimeout(timer);
+          if (err.name === 'AbortError') {
+            lastErr = new Error(`[${model}] 連線逾時`);
+          } else if (err.message && !err.message.startsWith('[')) {
+            throw err;
+          } else {
+            lastErr = err;
+          }
+        }
+      }
+      throw lastErr || new Error('所有備援模型皆忙碌中，請稍後再試');
+    }
+
+    // --- Offline Tesseract Fallback ---
+    async function recognizeOffline(dataUrl) {
+      if (typeof Tesseract === 'undefined') {
+        throw new Error('離線 OCR 引擎尚未載入完成');
+      }
+      el.progressLabel.textContent = '正在執行離線 OCR 辨識...';
+      const worker = await Tesseract.createWorker('eng', 1, {
+        logger: (m) => {
+          if (m && typeof m.progress === 'number') {
+            const pct = Math.round(m.progress * 100);
+            el.progressPct.textContent = `${pct}%`;
+            el.progressBar.style.width = `${pct}%`;
+          }
+        }
+      });
+      const res = await worker.recognize(dataUrl);
+      await worker.terminate();
+
+      const lines = (res?.data?.text || '').split(/\r?\n/);
+      const out = [];
+      state.usedModel = '離線 OCR';
+
+      lines.forEach((line, idx) => {
+        const cleaned = line.trim();
+        if (!cleaned) return;
+        const val = evaluateExpression(cleaned);
+        if (val !== null) {
+          out.push({
+            id: `ocr_${Date.now()}_${idx}`,
+            expr: formatExpressionDisplay(cleaned),
+            value: (!state.allowNegative && val < 0) ? Math.abs(val) : val,
+            included: true,
+            isManual: false,
+          });
+        }
+      });
+      return out;
+    }
+
+    async function runRecognition() {
+      if (!state.imageDataUrl || state.isProcessing) return;
+      if (state.useAi && !state.apiKey) {
+        openApiModal();
+        showToast('請先設定免費的 Gemini API Key', 'info');
+        return;
+      }
+
+      state.isProcessing = true;
+      el.progressWrap.classList.remove('hidden');
+      el.progressBar.style.width = '60%';
+      el.progressPct.textContent = '處理中';
+
+      try {
+        const results = state.useAi
+          ? await recognizeWithGemini(state.imageDataUrl)
+          : await recognizeOffline(state.imageDataUrl);
+
+        state.items = results;
+        renderItems();
+        updateStats();
+
+        if (results.length > 0) {
+          showToast(`辨識完成！共計算 ${results.length} 筆算式`, 'success');
+        } else {
+          showToast('未偵測到明確算式，可點擊「+ 新增」手動補登', 'info');
+        }
+      } catch (err) {
+        showToast(`辨識失敗：${err.message}`, 'error');
+      } finally {
+        state.isProcessing = false;
+        el.progressWrap.classList.add('hidden');
+      }
+    }
+
+    async function handleFileSelect(file) {
+      if (!file || !file.type.startsWith('image/')) {
+        showToast('請選擇有效的圖片檔案', 'error');
+        return;
+      }
+      try {
+        const resized = await resizeImageFile(file);
+        state.imageDataUrl = resized;
+        el.previewImg.src = resized;
+        await runRecognition();
+      } catch (err) {
+        showToast(err.message || '圖片讀取失敗', 'error');
+      }
+    }
+
+    // --- UI Rendering ---
+    function updateStats() {
+      const included = state.items.filter((it) => it.included && Number.isFinite(it.value));
+      const sum = included.reduce((acc, it) => acc + it.value, 0);
+      el.totalSumDisplay.textContent = formatNum(sum);
+      el.statCount.textContent = `納入計算：${included.length} / ${state.items.length} 筆算式`;
+      el.statModel.textContent = state.usedModel ? `引擎：${state.usedModel}` : '';
+    }
+
+    function renderItems() {
+      if (state.items.length === 0) {
+        el.itemsList.innerHTML = `<div class="p-6 text-center text-xs text-slate-400">尚未偵測到算式，請拍照、選圖或上方手動新增</div>`;
+        return;
+      }
+
+      el.itemsList.innerHTML = state.items.map((item, idx) => `
+        <div data-id="${item.id}" class="px-4 py-3 flex items-center gap-2.5 hover:bg-slate-50 transition">
+          <input type="checkbox" class="item-toggle w-4 h-4 rounded accent-indigo-600 cursor-pointer shrink-0" ${item.included ? 'checked' : ''} />
+          <span class="text-xs text-slate-400 tabular-nums w-5 shrink-0">#${idx + 1}</span>
+          <input type="text" value="${item.expr}" class="item-expr flex-1 min-w-0 rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-2 focus:ring-indigo-500 ${!item.included ? 'line-through text-slate-400 bg-slate-50' : 'bg-white'}" />
+          <span class="text-sm font-bold tabular-nums text-indigo-700 shrink-0">= ${formatNum(item.value)}</span>
+          <button type="button" class="item-delete p-1.5 text-slate-400 hover:text-rose-600 transition shrink-0" title="刪除">
+            <i data-lucide="trash-2" class="w-4 h-4"></i>
+          </button>
+        </div>
+      `).join('');
+
+      if (window.lucide) lucide.createIcons();
+    }
+
+    // --- Event Listeners ---
+    function openApiModal() {
+      el.apiKeyInput.value = state.apiKey;
+      el.apiModal.classList.remove('hidden');
+      el.apiKeyInput.focus();
+    }
+    function closeApiModal() {
+      el.apiModal.classList.add('hidden');
+    }
+
+    el.btnOpenApiModal.addEventListener('click', openApiModal);
+    el.btnCloseModal.addEventListener('click', closeApiModal);
+    el.btnCancelModal.addEventListener('click', closeApiModal);
+    el.btnSaveApiKey.addEventListener('click', () => {
+      const val = el.apiKeyInput.value.trim();
+      if (!val) {
+        showToast('請輸入有效的 Gemini API Key', 'error');
+        return;
+      }
+      saveApiKey(val);
+      closeApiModal();
+      showToast('API Key 已儲存', 'success');
+    });
+
+    function updateModeUi() {
+      if (state.useAi) {
+        el.btnModeAi.classList.add('bg-white', 'text-indigo-600', 'shadow-sm');
+        el.btnModeAi.classList.remove('text-slate-600');
+        el.btnModeOcr.classList.remove('bg-white', 'text-indigo-600', 'shadow-sm');
+        el.btnModeOcr.classList.add('text-slate-600');
+        el.aiFilterRow.classList.remove('hidden');
+      } else {
+        el.btnModeOcr.classList.add('bg-white', 'text-indigo-600', 'shadow-sm');
+        el.btnModeOcr.classList.remove('text-slate-600');
+        el.btnModeAi.classList.remove('bg-white', 'text-indigo-600', 'shadow-sm');
+        el.btnModeAi.classList.add('text-slate-600');
+        el.aiFilterRow.classList.add('hidden');
+      }
+    }
+
+    el.btnModeAi.addEventListener('click', () => { state.useAi = true; updateModeUi(); });
+    el.btnModeOcr.addEventListener('click', () => { state.useAi = false; updateModeUi(); });
+
+    el.chipAll.addEventListener('click', () => {
+      state.presetMode = 'all';
+      el.chipAll.className = 'px-2.5 py-1 rounded-full font-medium bg-indigo-50 text-indigo-700 border border-indigo-200';
+      el.chipExcludeDate.className = 'px-2.5 py-1 rounded-full font-medium bg-slate-50 text-slate-600 border border-slate-200';
+    });
+    el.chipExcludeDate.addEventListener('click', () => {
+      state.presetMode = 'exclude_date';
+      el.chipExcludeDate.className = 'px-2.5 py-1 rounded-full font-medium bg-indigo-50 text-indigo-700 border border-indigo-200';
+      el.chipAll.className = 'px-2.5 py-1 rounded-full font-medium bg-slate-50 text-slate-600 border border-slate-200';
+    });
+    el.chkAllowNegative.addEventListener('change', (e) => {
+      state.allowNegative = e.target.checked;
+    });
+
+    el.cameraInput.addEventListener('change', (e) => {
+      if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
+      e.target.value = '';
+    });
+    el.galleryInput.addEventListener('change', (e) => {
+      if (e.target.files?.[0]) handleFileSelect(e.target.files[0]);
+      e.target.value = '';
+    });
+
+    el.dropZone.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      el.dropZone.classList.add('ring-2', 'ring-indigo-500');
+    });
+    el.dropZone.addEventListener('dragleave', () => {
+      el.dropZone.classList.remove('ring-2', 'ring-indigo-500');
+    });
+    el.dropZone.addEventListener('drop', (e) => {
+      e.preventDefault();
+      el.dropZone.classList.remove('ring-2', 'ring-indigo-500');
+      if (e.dataTransfer.files?.[0]) handleFileSelect(e.dataTransfer.files[0]);
+    });
+    window.addEventListener('paste', (e) => {
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const it of items) {
+        if (it.type.startsWith('image/')) {
+          handleFileSelect(it.getAsFile());
+          break;
+        }
+      }
+    });
+
+    el.btnRunAgain.addEventListener('click', runRecognition);
+    el.btnSample.addEventListener('click', loadSampleImage);
+
+    el.itemsList.addEventListener('click', (e) => {
+      const row = e.target.closest('[data-id]');
+      if (!row) return;
+      const id = row.getAttribute('data-id');
+      const item = state.items.find((x) => x.id === id);
+      if (!item) return;
+
+      if (e.target.closest('.item-delete')) {
+        state.items = state.items.filter((x) => x.id !== id);
+        renderItems();
+        updateStats();
+      } else if (e.target.classList.contains('item-toggle')) {
+        item.included = e.target.checked;
+        renderItems();
+        updateStats();
+      }
+    });
+
+    el.itemsList.addEventListener('input', (e) => {
+      if (!e.target.classList.contains('item-expr')) return;
+      const row = e.target.closest('[data-id]');
+      if (!row) return;
+      const id = row.getAttribute('data-id');
+      const item = state.items.find((x) => x.id === id);
+      if (!item) return;
+
+      item.expr = e.target.value;
+      const val = evaluateExpression(e.target.value);
+      if (val !== null) {
+        item.value = (!state.allowNegative && val < 0) ? Math.abs(val) : val;
+        const resultSpan = row.querySelector('span.text-indigo-700');
+        if (resultSpan) resultSpan.textContent = `= ${formatNum(item.value)}`;
+        updateStats();
+      }
+    });
+
+    el.manualAddForm.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const raw = el.manualExprInput.value.trim();
+      const val = evaluateExpression(raw);
+      if (val === null) {
+        showToast('請輸入有效的數字或算式（例如 50x15）', 'error');
+        return;
+      }
+      state.items.push({
+        id: `manual_${Date.now()}`,
+        expr: formatExpressionDisplay(raw),
+        value: (!state.allowNegative && val < 0) ? Math.abs(val) : val,
+        included: true,
+        isManual: true,
+      });
+      el.manualExprInput.value = '';
+      renderItems();
+      updateStats();
+    });
+
+    el.btnToggleAll.addEventListener('click', () => {
+      if (state.items.length === 0) return;
+      const allOn = state.items.every((x) => x.included);
+      state.items.forEach((x) => { x.included = !allOn; });
+      renderItems();
+      updateStats();
+    });
+
+    el.btnCopySum.addEventListener('click', async () => {
+      const raw = el.totalSumDisplay.textContent.replace(/,/g, '');
+      try {
+        if (navigator.clipboard?.writeText) {
+          await navigator.clipboard.writeText(raw);
+        } else {
+          const ta = document.createElement('textarea');
+          ta.value = raw;
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          ta.remove();
+        }
+        showToast(`已複製總和：${raw}`, 'success');
+      } catch (_) {
+        showToast('複製失敗，請手動選取總和', 'error');
+      }
+    });
+
+    el.btnExportCsv.addEventListener('click', () => {
+      if (state.items.length === 0) {
+        showToast('目前沒有可匯出的算式明細', 'info');
+        return;
+      }
+      const rows = [['項次', '算式', '計算結果', '納入加總']];
+      state.items.forEach((it, idx) => {
+        rows.push([idx + 1, `"${it.expr}"`, it.value, it.included ? '是' : '否']);
+      });
+      const sum = state.items.filter((x) => x.included).reduce((a, b) => a + b.value, 0);
+      rows.push(['總和', '', sum, '']);
+      const csv = '\uFEFF' + rows.map((r) => r.join(',')).join('\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `formula_sum_${Date.now()}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('已匯出 CSV 明細檔', 'success');
+    });
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (window.lucide) lucide.createIcons();
+      loadApiKey();
+      loadSampleImage();
+    });
+  </script>
+</body>
+</html>
