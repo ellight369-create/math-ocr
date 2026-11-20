@@ -203,7 +203,7 @@
   </main>
 
   <script>
-    const MODELS = ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite'];
+    const MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.8-flash'];
     const STORAGE_KEY = 'number_sum_gemini_key_v1';
 
     const state = {
@@ -385,7 +385,7 @@
           const img = new Image();
           img.onerror = () => reject(new Error('無效的圖片格式'));
           img.onload = () => {
-            const maxDim = 1024;
+            const maxDim = 800;
             let w = img.width;
             let h = img.height;
             if (w > maxDim || h > maxDim) {
@@ -401,7 +401,7 @@
             c.width = w;
             c.height = h;
             c.getContext('2d').drawImage(img, 0, 0, w, h);
-            resolve(c.toDataURL('image/jpeg', 0.82));
+            resolve(c.toDataURL('image/jpeg', 0.72));
           };
           img.src = e.target.result;
         };
@@ -457,24 +457,26 @@
    - 若該行只有單一數字（沒有運算符號），expression 請直接填該數字字串。
 4. value 必須是純數字（支援小數${state.allowNegative ? '與負數' : '，不取負號'}）。`;
 
-      const payload = {
-        contents: [{
-          parts: [
-            { text: prompt },
-            { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
-          ]
-        }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          thinkingConfig: { thinkingLevel: 'LOW' }
-        }
-      };
-
       let lastErr = null;
       for (const model of MODELS) {
-        el.progressLabel.textContent = `正在使用 ${model} 辨識算式...`;
+        const payload = {
+          contents: [{
+            parts: [
+              { text: prompt },
+              { inline_data: { mime_type: 'image/jpeg', data: base64Data } }
+            ]
+          }],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            thinkingConfig: {
+              thinkingLevel: model === 'gemini-3.8-flash' ? 'LOW' : 'MINIMAL'
+            }
+          }
+        };
+
+        el.progressLabel.textContent = `正在使用 ${model} 極速辨識算式...`;
         const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 45000);
+        const timer = setTimeout(() => controller.abort(), 20000);
 
         try {
           const resp = await fetch(
