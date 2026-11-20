@@ -67,7 +67,7 @@
         </button>
       </div>
       <div class="relative rounded-xl overflow-hidden bg-black">
-        <video id="cameraVideo" autoplay playsinline muted class="w-full max-h-[60vh] object-cover"></video>
+        <video id="cameraVideo" autoplay playsinline webkit-playsinline muted class="w-full min-h-[260px] max-h-[60vh] aspect-[4/3] object-cover bg-black"></video>
       </div>
       <div class="flex items-center gap-2">
         <button id="btnCapturePhoto" type="button" class="flex-1 py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold flex items-center justify-center gap-2 shadow-sm">
@@ -912,8 +912,11 @@
           video: { facingMode: { ideal: 'environment' } },
           audio: false,
         });
-        cameraVideo.srcObject = activeStream;
         cameraModal.classList.remove('hidden');
+        cameraVideo.muted = true;
+        cameraVideo.playsInline = true;
+        cameraVideo.srcObject = activeStream;
+        await cameraVideo.play().catch(() => {});
         if (window.lucide) lucide.createIcons();
       } catch (_) {
         // Fallback to native file/camera picker if permission denied or unavailable
